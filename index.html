@@ -200,15 +200,35 @@
 (function(){
   "use strict";
 
+  /* ---------------- backend config ---------------- */
+  var SB_URL = 'https://yighcuismepfmappcfui.supabase.co';
+  var SB_KEY = 'sb_publishable_nGh6iXqOO0iKTPo6uOvXSA_x4ZjIEUi';
+  function sbRpc(name, params){
+    return fetch(SB_URL + '/rest/v1/rpc/' + name, {
+      method: 'POST',
+      headers: { 'apikey': SB_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify(params || {})
+    }).then(function(r){
+      return r.text().then(function(text){
+        var data = null;
+        if (text) { try { data = JSON.parse(text); } catch(e){ data = text; } }
+        if (!r.ok) {
+          var msg = (data && data.message) ? data.message : 'Something went wrong. Please try again.';
+          var err = new Error(msg);
+          err.data = data;
+          throw err;
+        }
+        return data;
+      });
+    });
+  }
+
   /* ---------------- storage helpers ---------------- */
   var LS = {
-    tickets: 'arab_tickets_v1',
     map: 'arab_field_map_v1',
-    creds: 'arab_admin_creds_v1',
-    users: 'arab_admin_users_v1',
     source: 'arab_source_v1',
     bank: 'arab_bank_v1',
-    session: 'arab_admin_session_v1'
+    session: 'arab_admin_session_v2'
   };
 
   function load(key, fallback){
@@ -217,7 +237,6 @@
   }
   function save(key, val){ try { localStorage.setItem(key, JSON.stringify(val)); } catch(e){} }
 
-  function defaultCreds(){ return { username: 'admin', password: 'arab2026' }; }
   function defaultBank(){ return { processor: 'none', merchantName: 'City of Arab', connected: false }; }
   function defaultMap(){
     return { ticketId:'', firstName:'', lastName:'', dlNumber:'', violation:'', issueDate:'', dueDate:'', amount:'', status:'' };
@@ -234,15 +253,15 @@
     'Manager': { source:true, mapping:true, data:true, payments:true, users:false },
     'Support Staff': { source:false, mapping:false, data:true, payments:false, users:false }
   };
-  function defaultUsers(){
-    var legacy = load(LS.creds, null);
-    return [{
-      id: 'u_admin',
-      username: legacy ? legacy.username : 'admin',
-      password: legacy ? legacy.password : 'arab2026',
-      role: 'Super Admin',
-      permissions: { source:true, mapping:true, data:true, payments:true, users:true }
-    }];
+
+  function fromDbTicket(row){
+    if (!row) return null;
+    return {
+      id: row.id, ticketId: row.ticket_id, firstName: row.first_name, lastName: row.last_name,
+      dlNumber: row.dl_number, violation: row.violation, issueDate: row.issue_date, dueDate: row.due_date,
+      amount: row.amount, status: row.status, paymentMethod: row.payment_method,
+      paidDate: row.paid_date, confirmation: row.confirmation
+    };
   }
 
   var FIELD_DEFS = [
@@ -258,39 +277,79 @@
   ];
 
   /* ---------------- state ---------------- */
-  var _users = load(LS.users, null);
-  if (!_users || !_users.length) { _users = defaultUsers(); save(LS.users, _users); }
-  var _sessionVal = load(LS.session, null);
-  var _sessionUserId = null;
-  if (_sessionVal === true) { _sessionUserId = _users[0] ? _users[0].id : null; }
-  else if (typeof _sessionVal === 'string') { _sessionUserId = _sessionVal; }
-
   var state = {
     view: 'search',            // search | ticket | payment | success | adminLogin | adminDashboard
-    tickets: load(LS.tickets, []),
+    tickets: [],
+    ticketsLoaded: false,
     fieldMap: load(LS.map, defaultMap()),
-    users: _users,
+    users: [],
     source: load(LS.source, { type:'', sheetUrl:'', headers:[], rawRows:[], lastSync:'' }),
     bank: load(LS.bank, defaultBank()),
-    isAdmin: !!(_sessionUserId && _users.some(function(u){ return u.id === _sessionUserId; })),
-    currentUserId: _sessionUserId,
+    isAdmin: false,
+    currentUserId: null,
+    currentUserInfo: null,
+    sessionToken: null,
     editingUserId: null,
     activeTicket: null,
     lastConfirmation: null,
     lastPaymentMethod: '',
     searchError: '',
+    paymentError: '',
     adminError: '',
     syncStatus: '',
     invoiceStatus: '',
     adminTab: 'source' // source | mapping | data | payments | users | account
   };
 
-  function currentUser(){ return state.users.find(function(u){ return u.id === state.currentUserId; }) || null; }
+  function currentUser(){
+    if (!state.currentUserInfo) return null;
+    return { id: state.currentUserId, username: state.currentUserInfo.username, role: state.currentUserInfo.role, permissions: state.currentUserInfo.permissions };
+  }
   function hasPerm(key){ var u = currentUser(); return !!(u && u.permissions && u.permissions[key]); }
   function firstPermittedTab(){
     var order = ['source','mapping','data','payments','users'];
     for (var i=0;i<order.length;i++){ if (hasPerm(order[i])) return order[i]; }
     return 'account';
+  }
+
+  function loadStaffTickets(){
+    if (!state.sessionToken) return Promise.resolve();
+    return sbRpc('staff_list_tickets', { p_token: state.sessionToken }).then(function(rows){
+      state.tickets = (rows||[]).map(fromDbTicket);
+      state.ticketsLoaded = true;
+      render();
+    }).catch(function(err){
+      state.syncStatus = { ok:false, msg: 'Could not load ticket data: ' + (err && err.message ? err.message : 'unknown error') };
+      render();
+    });
+  }
+
+  function loadStaffUsers(){
+    if (!state.sessionToken) return Promise.resolve();
+    return sbRpc('staff_list_users', { p_token: state.sessionToken }).then(function(rows){
+      state.users = rows || [];
+      render();
+    }).catch(function(err){
+      state.syncStatus = { ok:false, msg: 'Could not load users: ' + (err && err.message ? err.message : 'unknown error') };
+      render();
+    });
+  }
+
+  function refreshAdminTabData(){
+    if ((state.adminTab === 'data' || state.adminTab === 'source') && (hasPerm('data')||hasPerm('source'))) loadStaffTickets();
+    if (state.adminTab === 'users' && hasPerm('users')) loadStaffUsers();
+  }
+
+  function restoreSession(){
+    var tok = load(LS.session, null);
+    if (!tok) return;
+    sbRpc('staff_check_session', { p_token: tok }).then(function(res){
+      if (!res) { save(LS.session, null); return; }
+      state.isAdmin = true;
+      state.currentUserId = res.id;
+      state.currentUserInfo = { username: res.username, role: res.role, permissions: res.permissions };
+      state.sessionToken = tok;
+    }).catch(function(){ /* ignore — stay logged out if we can't reach the server right now */ });
   }
 
   function setView(v){ state.view = v; state.searchError=''; render(); window.scrollTo(0,0); }
@@ -311,13 +370,13 @@
   }
   function isPaid(s){ return norm(s).indexOf('paid') === 0 && norm(s).indexOf('unpaid') !== 0; }
 
-  /* apply the field map to raw rows -> ticket objects */
-  function rebuildTicketsFromSource(){
+  /* apply the field map to raw rows -> ticket objects, then save to the shared database */
+  function rebuildTicketsFromSource(cb){
     var map = state.fieldMap, rows = state.source.rawRows || [];
-    if (!map.ticketId && !(map.firstName && map.lastName && map.dlNumber)) { return; }
+    if (!map.ticketId && !(map.firstName && map.lastName && map.dlNumber)) { if (cb) cb(0); return; }
     var out = [];
-    rows.forEach(function(row, idx){
-      var t = { _row: idx };
+    rows.forEach(function(row){
+      var t = {};
       FIELD_DEFS.forEach(function(f){
         var col = map[f.key];
         t[f.key] = col ? (row[col] != null ? String(row[col]).trim() : '') : '';
@@ -325,26 +384,25 @@
       if (!t.status) t.status = 'Unpaid';
       if (t.ticketId || (t.firstName && t.lastName)) out.push(t);
     });
-    state.tickets = out;
-    save(LS.tickets, out);
+    if (!out.length || !state.sessionToken) { if (cb) cb(0); return; }
+    sbRpc('staff_sync_tickets', { p_token: state.sessionToken, p_rows: out }).then(function(n){
+      loadStaffTickets().then(function(){ if (cb) cb(n); });
+    }).catch(function(err){
+      state.syncStatus = { ok:false, msg: 'Could not save ticket data: ' + (err && err.message ? err.message : 'unknown error') };
+      render();
+    });
   }
 
   /* ---------------- search ---------------- */
-  function runSearch(q){
+  function validateSearchQuery(q){
     var byId = norm(q.ticketId);
     var fn = norm(q.firstName), ln = norm(q.lastName), dl = norm(q.dlNumber);
-    var hasId = !!byId;
-    var hasName = fn && ln && dl;
-    if (!hasId && !hasName) {
+    if (!byId && !(fn && ln && dl)) {
       state.searchError = "Enter a ticket ID, or your first name, last name, and driver's license number.";
-      return [];
+      return null;
     }
     state.searchError = '';
-    return state.tickets.filter(function(t){
-      var idMatch = hasId && norm(t.ticketId) === byId;
-      var nameMatch = hasName && norm(t.firstName) === fn && norm(t.lastName) === ln && norm(t.dlNumber) === dl;
-      return idMatch || nameMatch;
-    });
+    return { ticketId: byId || null, firstName: fn || null, lastName: ln || null, dlNumber: dl || null };
   }
 
   /* ---------------- render root ---------------- */
@@ -415,11 +473,11 @@
     html += '<div style="margin-top:14px;"><button class="primary" id="btn-search">Search</button></div>';
     html += '</div>';
 
-    if (state.tickets.length === 0) {
-      html += '<div class="banner beta">No ticket data is loaded yet. An administrator needs to connect a spreadsheet in Admin before searches will return results.</div>';
+    if (state._searching) {
+      html += '<div class="banner beta">Searching…</div>';
     }
 
-    if (results !== null) {
+    if (results !== null && !state._searching) {
       if (results.length === 0) {
         html += '<div class="empty"><div class="big">🔍</div>No matching ticket found. Double-check the ticket ID or your name and driver\'s license number.</div>';
       } else {
@@ -436,7 +494,7 @@
     var cls = statusClass(t.status);
     var label = isPaid(t.status) ? 'Paid' : (cls==='status-overdue' ? 'Overdue' : 'Unpaid');
     return (
-      '<div class="card slip" data-open-ticket="'+esc(t._row)+'" style="cursor:pointer;">' +
+      '<div class="card slip" data-open-ticket="'+esc(t.ticketId)+'" style="cursor:pointer;">' +
         '<div class="ticket-hd"><span class="ticket-id">'+esc(t.ticketId||'—')+'</span><span class="status-pill '+cls+'">'+label+'</span></div>' +
         '<div class="kv"><span class="k">Name</span><span>'+esc(t.firstName)+' '+esc(t.lastName)+'</span></div>' +
         (t.violation ? '<div class="kv"><span class="k">Violation</span><span>'+esc(t.violation)+'</span></div>' : '') +
@@ -465,6 +523,7 @@
     html += '<div class="amount-line"><span class="k">'+(paid?'Amount paid':'Amount due')+'</span><span class="amt">'+fmtMoney(t.amount)+'</span></div>';
     html += '</div>';
 
+    if (state.paymentError) html += '<div class="banner warn">'+esc(state.paymentError)+'</div>';
     if (paid) {
       html += '<div class="banner ok">This citation shows as paid. If you believe this is an error, contact the City of Arab municipal court.</div>';
       html += '<button class="ghost" id="btn-download-receipt">Download receipt (PDF)</button>';
@@ -808,16 +867,19 @@
       }
     });
     save(LS.map, state.fieldMap);
-    rebuildTicketsFromSource();
-    state.syncStatus = { ok:true, msg: 'Synced '+rows.length+' rows, '+headers.length+' columns. Review Field mapping to confirm each app field is mapped correctly.' };
     state.adminTab = 'mapping';
+    state.syncStatus = { ok:true, msg: 'Synced '+rows.length+' rows, '+headers.length+' columns. Saving to the shared database…' };
+    render();
+    rebuildTicketsFromSource(function(n){
+      state.syncStatus = { ok:true, msg: 'Saved '+n+' tickets to the shared database. Review Field mapping to confirm each app field is mapped correctly.' };
+      render();
+    });
   }
 
   function parseCsvText(text, sourceType){
     var parsed = Papa.parse(text, { header:true, skipEmptyLines:true });
     var headers = parsed.meta && parsed.meta.fields ? parsed.meta.fields : [];
     applyParsedRows(headers, parsed.data, sourceType);
-    render();
   }
 
   /* ---------------- event binding ---------------- */
@@ -832,6 +894,7 @@
       if (state.isAdmin) {
         if (state.adminTab !== 'account' && !hasPerm(state.adminTab)) state.adminTab = firstPermittedTab();
         setView('adminDashboard');
+        refreshAdminTabData();
       } else {
         setView('adminLogin');
       }
@@ -847,13 +910,25 @@
       state._q_first = document.getElementById('f-first').value;
       state._q_last = document.getElementById('f-last').value;
       state._q_dl = document.getElementById('f-dl').value;
-      state._lastResults = runSearch({ ticketId: state._q_ticketId, firstName: state._q_first, lastName: state._q_last, dlNumber: state._q_dl });
+      var q = validateSearchQuery({ ticketId: state._q_ticketId, firstName: state._q_first, lastName: state._q_last, dlNumber: state._q_dl });
+      if (!q) { state._lastResults = null; render(); return; }
+      state._searching = true;
+      state._lastResults = null;
       render();
+      sbRpc('search_ticket', { p_ticket_id: q.ticketId, p_first_name: q.firstName, p_last_name: q.lastName, p_dl_number: q.dlNumber }).then(function(rows){
+        state._searching = false;
+        state._lastResults = (rows||[]).map(fromDbTicket);
+        render();
+      }).catch(function(err){
+        state._searching = false;
+        state.searchError = 'Something went wrong searching for that ticket. Please try again.';
+        render();
+      });
     };
     el.querySelectorAll('[data-open-ticket]').forEach(function(node){
       node.onclick = function(){
-        var row = node.getAttribute('data-open-ticket');
-        var t = state.tickets.find(function(x){ return String(x._row) === row; });
+        var tid = node.getAttribute('data-open-ticket');
+        var t = (state._lastResults||[]).find(function(x){ return x.ticketId === tid; });
         if (t) { state.activeTicket = t; setView('ticket'); }
       };
     });
@@ -906,25 +981,46 @@
     if (btnAdminLogin) btnAdminLogin.onclick = function(){
       var u = document.getElementById('au').value;
       var p = document.getElementById('ap').value;
-      var match = state.users.find(function(x){ return norm(x.username) === norm(u) && x.password === p; });
-      if (match) {
+      state.adminError = '';
+      btnAdminLogin.disabled = true;
+      sbRpc('staff_login', { p_username: u, p_password: p }).then(function(res){
+        btnAdminLogin.disabled = false;
+        if (!res) {
+          state.adminError = 'Incorrect username or password.';
+          render();
+          return;
+        }
         state.isAdmin = true;
-        state.currentUserId = match.id;
-        save(LS.session, match.id);
-        state.adminError = '';
+        state.currentUserId = res.id;
+        state.currentUserInfo = { username: res.username, role: res.role, permissions: res.permissions };
+        state.sessionToken = res.token;
+        save(LS.session, res.token);
         state.adminTab = firstPermittedTab();
         setView('adminDashboard');
-      } else {
-        state.adminError = 'Incorrect username or password.';
+        refreshAdminTabData();
+      }).catch(function(err){
+        btnAdminLogin.disabled = false;
+        state.adminError = 'Something went wrong logging in. Please try again.';
         render();
-      }
+      });
     };
 
     var btnLogout = document.getElementById('btn-logout');
-    if (btnLogout) btnLogout.onclick = function(){ state.isAdmin = false; state.currentUserId = null; save(LS.session, null); setView('search'); };
+    if (btnLogout) btnLogout.onclick = function(){
+      var tok = state.sessionToken;
+      state.isAdmin = false; state.currentUserId = null; state.currentUserInfo = null; state.sessionToken = null;
+      save(LS.session, null);
+      setView('search');
+      if (tok) sbRpc('staff_logout', { p_token: tok }).catch(function(){});
+    };
 
     el.querySelectorAll('[data-admintab]').forEach(function(node){
-      node.onclick = function(){ state.adminTab = node.getAttribute('data-admintab'); state.syncStatus=''; render(); };
+      node.onclick = function(){
+        state.adminTab = node.getAttribute('data-admintab');
+        state.syncStatus='';
+        render();
+        refreshAdminTabData();
+      };
     });
 
     var btnFetchSheet = document.getElementById('btn-fetch-sheet');
@@ -960,7 +1056,6 @@
           var rows = XLSX.utils.sheet_to_json(firstSheet, { defval:'' });
           var headers = rows.length ? Object.keys(rows[0]) : [];
           applyParsedRows(headers, rows, 'file-xlsx');
-          render();
         }
       };
       if (isCsv) reader.readAsText(file); else reader.readAsArrayBuffer(file);
@@ -980,10 +1075,13 @@
         if (sel) state.fieldMap[f.key] = sel.value;
       });
       save(LS.map, state.fieldMap);
-      rebuildTicketsFromSource();
-      state.syncStatus = { ok:true, msg:'Mapping saved. '+state.tickets.length+' tickets are now available to search.' };
-      state.adminTab = 'data';
+      state.syncStatus = { ok:true, msg:'Saving…' };
       render();
+      rebuildTicketsFromSource(function(n){
+        state.syncStatus = { ok:true, msg: n + ' tickets are now available to search.' };
+        state.adminTab = 'data';
+        render();
+      });
     };
 
     var btnSaveBank = document.getElementById('btn-save-bank');
@@ -997,29 +1095,34 @@
 
     var btnSaveAccount = document.getElementById('btn-save-account');
     if (btnSaveAccount) btnSaveAccount.onclick = function(){
-      var self = currentUser();
-      if (!self) return;
       var newUsername = document.getElementById('new-user').value.trim();
       var newPass = document.getElementById('new-pass').value;
-      if (newUsername) {
-        var dup = state.users.some(function(x){ return x.id !== self.id && norm(x.username) === norm(newUsername); });
-        if (dup) { state.syncStatus = { ok:false, msg:'That username is already in use.' }; render(); return; }
-        self.username = newUsername;
-      }
-      if (newPass) self.password = newPass;
-      save(LS.users, state.users);
-      state.syncStatus = { ok:true, msg:'Account updated.' };
-      render();
+      sbRpc('staff_update_self', { p_token: state.sessionToken, p_username: newUsername || null, p_password: newPass || null }).then(function(){
+        if (newUsername && state.currentUserInfo) state.currentUserInfo.username = newUsername;
+        state.syncStatus = { ok:true, msg:'Account updated.' };
+        render();
+      }).catch(function(err){
+        state.syncStatus = { ok:false, msg: err && err.message ? err.message : 'Could not update account.' };
+        render();
+      });
     };
 
     var btnResetData = document.getElementById('btn-reset-data');
     if (btnResetData) btnResetData.onclick = function(){
-      if (!confirm('This clears tickets, the spreadsheet connection, and field mapping on this device. Admin users and payment settings are kept. Continue?')) return;
-      state.tickets = []; save(LS.tickets, []);
-      state.source = { type:'', sheetUrl:'', headers:[], rawRows:[], lastSync:'' }; save(LS.source, state.source);
-      state.fieldMap = defaultMap(); save(LS.map, state.fieldMap);
-      state.syncStatus = { ok:true, msg:'Demo data cleared.' };
+      if (!confirm('This clears all ticket data from the shared database, plus the spreadsheet connection and field mapping on this device. Admin users and payment settings are kept. Continue?')) return;
+      state.syncStatus = { ok:true, msg:'Clearing…' };
       render();
+      sbRpc('staff_clear_tickets', { p_token: state.sessionToken }).then(function(){
+        state.source = { type:'', sheetUrl:'', headers:[], rawRows:[], lastSync:'' }; save(LS.source, state.source);
+        state.fieldMap = defaultMap(); save(LS.map, state.fieldMap);
+        return loadStaffTickets();
+      }).then(function(){
+        state.syncStatus = { ok:true, msg:'Demo data cleared.' };
+        render();
+      }).catch(function(err){
+        state.syncStatus = { ok:false, msg: err && err.message ? err.message : 'Could not clear data.' };
+        render();
+      });
     };
 
     var btnExportCsv = document.getElementById('btn-export-csv');
@@ -1057,29 +1160,23 @@
         perms[pd.key] = !!(cb && cb.checked);
       });
       if (!username) { state.syncStatus = { ok:false, msg:'Enter a username.' }; render(); return; }
-      var dup = state.users.some(function(x){ return norm(x.username) === norm(username) && x.id !== state.editingUserId; });
-      if (dup) { state.syncStatus = { ok:false, msg:'That username is already in use.' }; render(); return; }
-
-      if (state.editingUserId) {
-        var existing = state.users.find(function(x){ return x.id === state.editingUserId; });
-        if (existing) {
-          existing.username = username;
-          if (password) existing.password = password;
-          existing.role = role;
-          existing.permissions = perms;
-        }
+      if (!state.editingUserId && !password) { state.syncStatus = { ok:false, msg:'Enter a password for the new user.' }; render(); return; }
+      var wasEditing = !!state.editingUserId;
+      sbRpc('staff_upsert_user', {
+        p_token: state.sessionToken,
+        p_target_id: state.editingUserId || null,
+        p_username: username,
+        p_password: password || null,
+        p_role: role,
+        p_permissions: perms
+      }).then(function(){
         state.editingUserId = null;
-        state.syncStatus = { ok:true, msg:'User updated.' };
-      } else {
-        if (!password) { state.syncStatus = { ok:false, msg:'Enter a password for the new user.' }; render(); return; }
-        state.users.push({
-          id: 'u_' + Date.now().toString(36) + Math.random().toString(36).slice(2,6),
-          username: username, password: password, role: role, permissions: perms
-        });
-        state.syncStatus = { ok:true, msg:'User added.' };
-      }
-      save(LS.users, state.users);
-      render();
+        state.syncStatus = { ok:true, msg: wasEditing ? 'User updated.' : 'User added.' };
+        return loadStaffUsers();
+      }).catch(function(err){
+        state.syncStatus = { ok:false, msg: err && err.message ? err.message : 'Could not save that user.' };
+        render();
+      });
     };
 
     var btnCancelEditUser = document.getElementById('btn-cancel-edit-user');
@@ -1093,11 +1190,19 @@
         var id = node.getAttribute('data-del-user');
         if (state.users.length <= 1) { state.syncStatus = { ok:false, msg:"You can't delete the last remaining admin user." }; render(); return; }
         if (!confirm('Delete this admin user? This cannot be undone.')) return;
-        state.users = state.users.filter(function(x){ return x.id !== id; });
-        if (state.currentUserId === id) { state.currentUserId = null; state.isAdmin = false; save(LS.session, null); }
-        save(LS.users, state.users);
-        state.syncStatus = { ok:true, msg:'User deleted.' };
-        render();
+        sbRpc('staff_delete_user', { p_token: state.sessionToken, p_target_id: id }).then(function(){
+          if (state.currentUserId === id) {
+            state.currentUserId = null; state.isAdmin = false; state.currentUserInfo = null; state.sessionToken = null;
+            save(LS.session, null);
+            setView('search');
+            return;
+          }
+          state.syncStatus = { ok:true, msg:'User deleted.' };
+          return loadStaffUsers();
+        }).catch(function(err){
+          state.syncStatus = { ok:false, msg: err && err.message ? err.message : 'Could not delete that user.' };
+          render();
+        });
       };
     });
 
@@ -1148,17 +1253,16 @@
 
   function processSimulatedPayment(){
     var t = state.activeTicket;
-    t.status = 'Paid';
-    t.paymentMethod = state.lastPaymentMethod || '';
-    t.paidDate = new Date().toLocaleString();
-    var idx = state.tickets.findIndex(function(x){ return x._row === t._row; });
-    if (idx > -1) state.tickets[idx] = t;
-    save(LS.tickets, state.tickets);
-    state.lastConfirmation = 'ARAB-' + Math.random().toString(36).slice(2,8).toUpperCase();
-    t.confirmation = state.lastConfirmation;
-    if (idx > -1) state.tickets[idx] = t;
-    save(LS.tickets, state.tickets);
-    setView('success');
+    state.paymentError = '';
+    sbRpc('process_payment', { p_ticket_id: t.ticketId, p_payment_method: state.lastPaymentMethod || '' }).then(function(row){
+      var updated = fromDbTicket(row);
+      state.activeTicket = updated;
+      state.lastConfirmation = updated.confirmation;
+      setView('success');
+    }).catch(function(err){
+      state.paymentError = 'Something went wrong recording your payment. Please try again.';
+      setView('ticket');
+    });
   }
 
   /* ---------------- invoices ---------------- */
@@ -1223,6 +1327,7 @@
   }
 
   render();
+  restoreSession();
 })();
 </script>
 </body>
