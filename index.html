@@ -72,15 +72,6 @@
     border-bottom: 3px solid var(--accent);
     box-shadow: 0 2px 8px rgba(0,0,0,0.08);
   }
-  .seal {
-    width: 42px; height: 42px; flex: none;
-    border-radius: 50%;
-    background: var(--primary);
-    display: flex; align-items: center; justify-content: center;
-    font-family: var(--serif); font-weight: 700; font-size: 15px;
-    color: #F4F6F4;
-    border: 2px solid var(--accent);
-  }
   .titleblock { flex: 1; min-width: 0; }
   .titleblock .city { font-size: 11.5px; letter-spacing: 0.02em; color: var(--accent-dark); font-weight: 600; line-height: 1; }
   .titleblock h1 {
@@ -322,16 +313,14 @@
 
   function header(){
     var tabsHtml = '';
-    if (state.view !== 'adminLogin') {
+    if (state.view !== 'adminLogin' && state.view !== 'adminDashboard') {
       tabsHtml =
         '<nav class="tabs">' +
-          '<button data-tab="public" class="'+(state.view!=='adminLogin' && state.view!=='adminDashboard' ? 'active':'')+'">Look up a ticket</button>' +
-          '<button data-tab="admin" class="'+(state.view==='adminDashboard'?'active':'')+'">'+(state.isAdmin?'Admin':'Admin login')+'</button>' +
+          '<button data-tab="public" class="active">Look up a ticket</button>' +
         '</nav>';
     }
     return (
       '<header class="top">' +
-        '<div class="seal">AR</div>' +
         '<div class="titleblock">' +
           '<div class="city">CITY OF ARAB, ALABAMA</div>' +
           '<h1>Arab Ticket Portal</h1>' +
@@ -342,7 +331,14 @@
   }
 
   function footerHtml(){
-    return '<footer class="betafoot">Arab Ticket Portal — Beta version 0.1. This is a preview build for the City of Arab. Data shown may be test data, and payments are simulated until a payment processor is connected.</footer>';
+    var adminLinkHtml = '';
+    if (state.view !== 'adminLogin' && state.view !== 'adminDashboard') {
+      adminLinkHtml = '<div style="text-align:center;padding:2px 24px 0;"><button class="link" id="btn-admin-footer">Administrator log in</button></div>';
+    }
+    return (
+      '<footer class="betafoot">Arab Ticket Portal — Beta version 0.1. This is a preview build for the City of Arab. Data shown may be test data, and payments are simulated until a payment processor is connected.</footer>' +
+      adminLinkHtml
+    );
   }
 
   function body(){
@@ -494,13 +490,12 @@
     var html = '<main>';
     html += '<div class="card slip">';
     html += '<div class="section-title">Admin login</div>';
-    html += '<div class="section-sub">Restricted to City of Arab staff. Beta build — default credentials should be changed before real citation data is loaded.</div>';
+    html += '<div class="section-sub">Restricted to City of Arab staff.</div>';
     html += '<div class="field"><label for="au">Username</label><input id="au" autocapitalize="off"></div>';
     html += '<div class="field"><label for="ap">Password</label><input id="ap" type="password"></div>';
     if (state.adminError) html += '<div class="banner warn">'+esc(state.adminError)+'</div>';
     html += '<button class="primary" id="btn-adminlogin" style="margin-top:6px;">Log in</button>';
     html += '</div>';
-    html += '<div class="banner beta">Demo credentials: <strong>admin</strong> / <strong>arab2026</strong>. Change these in Admin → Account after logging in.</div>';
     html += '</main>';
     return html;
   }
@@ -689,9 +684,10 @@
     var el = document.getElementById('app');
 
     var tabPublic = el.querySelector('[data-tab="public"]');
-    var tabAdmin = el.querySelector('[data-tab="admin"]');
     if (tabPublic) tabPublic.onclick = function(){ setView('search'); };
-    if (tabAdmin) tabAdmin.onclick = function(){ setView(state.isAdmin ? 'adminDashboard' : 'adminLogin'); };
+
+    var btnAdminFooter = document.getElementById('btn-admin-footer');
+    if (btnAdminFooter) btnAdminFooter.onclick = function(){ setView(state.isAdmin ? 'adminDashboard' : 'adminLogin'); };
 
     var back = el.querySelector('[data-back]');
     if (back) back.onclick = function(){ setView(back.getAttribute('data-back')); };
