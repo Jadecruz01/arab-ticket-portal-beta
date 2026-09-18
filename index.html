@@ -424,7 +424,7 @@
       '<header class="top">' +
         '<div class="titleblock">' +
           '<div class="city">CITY OF ARAB, ALABAMA</div>' +
-          '<h1>Arab Ticket Portal</h1>' +
+          '<h1>Ticket Portal</h1>' +
         '</div>' +
         '<div class="beta-badge">BETA</div>' +
       '</header>' + tabsHtml
@@ -856,7 +856,7 @@
           if (f.key === 'dlNumber') return /license|dl/.test(hn);
           if (f.key === 'firstName') return hn.indexOf('first') === 0;
           if (f.key === 'lastName') return hn.indexOf('last') === 0;
-          if (f.key === 'amount') return /amount|due|fine|total/.test(hn);
+          if (f.key === 'amount') return /amount|fine|total/.test(hn) && !/due/.test(hn);
           if (f.key === 'status') return hn === 'status';
           if (f.key === 'violation') return /violation|description|offense/.test(hn);
           if (f.key === 'issueDate') return /issue|citationdate|date/.test(hn) && !/due/.test(hn);
