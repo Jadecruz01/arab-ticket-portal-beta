@@ -298,7 +298,8 @@
     adminError: '',
     syncStatus: '',
     invoiceStatus: '',
-    adminTab: 'source' // source | mapping | data | payments | users | account
+    adminTab: 'source', // source | mapping | data | payments | users | account
+    fyFilter: 'all'
   };
 
   function currentUser(){
@@ -336,7 +337,8 @@
   }
 
   function refreshAdminTabData(){
-    if ((state.adminTab === 'data' || state.adminTab === 'source') && (hasPerm('data')||hasPerm('source'))) loadStaffTickets();
+    // tickets are loaded regardless of the active subtab since the fiscal-year overview above the subtabs always needs them
+    if (hasPerm('data')||hasPerm('source')) loadStaffTickets();
     if (state.adminTab === 'users' && hasPerm('users')) loadStaffUsers();
   }
 
@@ -369,6 +371,68 @@
     return 'status-unpaid';
   }
   function isPaid(s){ return norm(s).indexOf('paid') === 0 && norm(s).indexOf('unpaid') !== 0; }
+
+  /* ---------------- fiscal year filtering (Oct 1 - Sep 30, based on issue date) ---------------- */
+  function parseDateFlexible(s){
+    if (!s) return null;
+    s = String(s).trim();
+    var m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+    if (m) {
+      var mo = parseInt(m[1],10), da = parseInt(m[2],10), yr = parseInt(m[3],10);
+      if (yr < 100) yr += 2000;
+      var d = new Date(yr, mo-1, da);
+      if (!isNaN(d.getTime())) return d;
+    }
+    m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (m) {
+      var d2 = new Date(parseInt(m[1],10), parseInt(m[2],10)-1, parseInt(m[3],10));
+      if (!isNaN(d2.getTime())) return d2;
+    }
+    var d3 = new Date(s);
+    return isNaN(d3.getTime()) ? null : d3;
+  }
+  function fiscalYearOf(dateStr){
+    var d = parseDateFlexible(dateStr);
+    if (!d) return null;
+    var mo = d.getMonth() + 1;
+    return mo >= 10 ? d.getFullYear() + 1 : d.getFullYear();
+  }
+  function currentFiscalYear(){ return fiscalYearOf(new Date().toISOString().slice(0,10)); }
+  function availableFiscalYears(){
+    var set = {};
+    state.tickets.forEach(function(t){
+      var fy = fiscalYearOf(t.issueDate);
+      if (fy) set[fy] = true;
+    });
+    set[currentFiscalYear()] = true;
+    return Object.keys(set).map(Number).sort(function(a,b){ return b - a; });
+  }
+  function fyFilteredTickets(){
+    if (state.fyFilter === 'all') return state.tickets;
+    var fy = Number(state.fyFilter);
+    return state.tickets.filter(function(t){ return fiscalYearOf(t.issueDate) === fy; });
+  }
+  function fyLabel(){ return state.fyFilter === 'all' ? 'All Time' : ('FY' + state.fyFilter); }
+  function fySlug(){ return state.fyFilter === 'all' ? 'all-time' : ('fy' + state.fyFilter); }
+  function fyStats(list){
+    var total = list.length;
+    var paidCount = list.filter(function(t){ return isPaid(t.status); }).length;
+    var unpaidCount = total - paidCount;
+    var collected = list.filter(function(t){ return isPaid(t.status); }).reduce(function(sum,t){
+      var n = parseFloat(String(t.amount).replace(/[^0-9.\-]/g,''));
+      return sum + (isNaN(n) ? 0 : n);
+    }, 0);
+    return { total: total, paid: paidCount, unpaid: unpaidCount, collected: collected };
+  }
+  function ticketExportRows(list){
+    return list.map(function(t){
+      return {
+        'Ticket ID': t.ticketId, 'First Name': t.firstName, 'Last Name': t.lastName,
+        "Driver's License": t.dlNumber, 'Violation': t.violation, 'Issue Date': t.issueDate,
+        'Due Date': t.dueDate, 'Amount': t.amount, 'Status': t.status
+      };
+    });
+  }
 
   /* apply the field map to raw rows -> ticket objects, then save to the shared database */
   function rebuildTicketsFromSource(cb){
@@ -632,18 +696,30 @@
   }
 
   function adminOverview(){
-    var total = state.tickets.length;
-    var paidCount = state.tickets.filter(function(t){ return isPaid(t.status); }).length;
-    var unpaidCount = total - paidCount;
-    var collected = state.tickets.filter(function(t){ return isPaid(t.status); }).reduce(function(sum,t){
-      var n = parseFloat(String(t.amount).replace(/[^0-9.\-]/g,''));
-      return sum + (isNaN(n) ? 0 : n);
-    }, 0);
-    var html = '<div class="card" style="display:grid;grid-template-columns:repeat(2,1fr);gap:4px;">';
-    html += statTile('Total tickets', total);
-    html += statTile('Paid', paidCount);
-    html += statTile('Unpaid / overdue', unpaidCount);
-    html += statTile('Total collected', fmtMoney(collected));
+    var stats = fyStats(fyFilteredTickets());
+    var fyOptions = availableFiscalYears();
+    var selectHtml = '<select id="fy-filter" style="font-family:var(--sans);font-size:13px;padding:7px 9px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--ink);">';
+    selectHtml += '<option value="all"' + (state.fyFilter==='all'?' selected':'') + '>All time</option>';
+    fyOptions.forEach(function(fy){
+      selectHtml += '<option value="'+fy+'"' + (String(state.fyFilter)===String(fy)?' selected':'') + '>FY '+fy+' (Oct '+(fy-1)+'–Sep '+fy+')</option>';
+    });
+    selectHtml += '</select>';
+
+    var html = '<div class="card">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:flex-end;gap:10px;flex-wrap:wrap;margin-bottom:12px;">';
+    html += '<div><label for="fy-filter" style="font-size:12.5px;font-weight:600;color:var(--ink-soft);display:block;margin-bottom:5px;">Fiscal year</label>' + selectHtml + '</div>';
+    html += '<div style="display:flex;gap:6px;flex-wrap:wrap;">';
+    html += '<button class="ghost" id="btn-fy-export-csv" style="width:auto;padding:8px 12px;font-size:12.5px;">Export CSV</button>';
+    html += '<button class="ghost" id="btn-fy-export-xlsx" style="width:auto;padding:8px 12px;font-size:12.5px;">Export Excel</button>';
+    html += '<button class="ghost" id="btn-fy-export-pdf" style="width:auto;padding:8px 12px;font-size:12.5px;">Export PDF</button>';
+    html += '</div>';
+    html += '</div>';
+    html += '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:4px;">';
+    html += statTile('Total tickets', stats.total);
+    html += statTile('Paid', stats.paid);
+    html += statTile('Unpaid / overdue', stats.unpaid);
+    html += statTile('Total collected', fmtMoney(stats.collected));
+    html += '</div>';
     html += '</div>';
     return html;
   }
@@ -1013,6 +1089,28 @@
       };
     });
 
+    var fySelect = document.getElementById('fy-filter');
+    if (fySelect) fySelect.onchange = function(){ state.fyFilter = fySelect.value; render(); };
+
+    var btnFyCsv = document.getElementById('btn-fy-export-csv');
+    if (btnFyCsv) btnFyCsv.onclick = function(){
+      var rows = ticketExportRows(fyFilteredTickets());
+      var csv = Papa.unparse(rows);
+      downloadTextFile('arab-tickets-' + fySlug() + '.csv', csv, 'text/csv');
+    };
+
+    var btnFyXlsx = document.getElementById('btn-fy-export-xlsx');
+    if (btnFyXlsx) btnFyXlsx.onclick = function(){
+      var rows = ticketExportRows(fyFilteredTickets());
+      downloadXlsx('arab-tickets-' + fySlug() + '.xlsx', rows);
+    };
+
+    var btnFyPdf = document.getElementById('btn-fy-export-pdf');
+    if (btnFyPdf) btnFyPdf.onclick = function(){
+      var filtered = fyFilteredTickets();
+      downloadFyReportPdf(fyLabel(), ticketExportRows(filtered), fyStats(filtered));
+    };
+
     var btnFetchSheet = document.getElementById('btn-fetch-sheet');
     if (btnFetchSheet) btnFetchSheet.onclick = function(){
       var url = document.getElementById('sheet-url').value.trim();
@@ -1265,6 +1363,18 @@
     setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
   }
 
+  function downloadXlsx(filename, rows){
+    if (!window.XLSX) {
+      state.syncStatus = { ok:false, msg:"Couldn't build the Excel file right now (the spreadsheet library didn't load). Please try again in a moment." };
+      render();
+      return;
+    }
+    var ws = XLSX.utils.json_to_sheet(rows);
+    var wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Tickets');
+    XLSX.writeFile(wb, filename);
+  }
+
   function downloadInvoicePdf(t){
     if (!t) return;
     if (!window.jspdf || !window.jspdf.jsPDF) {
@@ -1314,6 +1424,70 @@
     doc.text(lines, margin, y);
 
     doc.save('Invoice-' + (t.ticketId || 'receipt') + '.pdf');
+  }
+
+  function downloadFyReportPdf(label, rows, stats){
+    if (!window.jspdf || !window.jspdf.jsPDF) {
+      state.syncStatus = { ok:false, msg:"Couldn't build the PDF right now (the PDF library didn't load). Please try again in a moment." };
+      render();
+      return;
+    }
+    var jsPDF = window.jspdf.jsPDF;
+    var doc = new jsPDF({ unit:'pt', format:'letter', orientation:'landscape' });
+    var pageWidth = doc.internal.pageSize.getWidth();
+    var pageHeight = doc.internal.pageSize.getHeight();
+    var margin = 40;
+    var y = 50;
+
+    doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor(75,122,69);
+    doc.text('CITY OF ARAB, ALABAMA', margin, y);
+    y += 20;
+    doc.setFont('times','bold'); doc.setFontSize(18); doc.setTextColor(27,75,114);
+    doc.text('Ticket Portal — ' + label + ' Report', margin, y);
+    y += 8;
+    doc.setDrawColor(215,221,213); doc.line(margin, y, pageWidth - margin, y);
+    y += 22;
+
+    doc.setFont('helvetica','normal'); doc.setFontSize(10); doc.setTextColor(24,42,54);
+    doc.text('Total tickets: ' + stats.total, margin, y);
+    doc.text('Paid: ' + stats.paid, margin + 170, y);
+    doc.text('Unpaid / overdue: ' + stats.unpaid, margin + 300, y);
+    doc.text('Total collected: ' + fmtMoney(stats.collected), margin + 480, y);
+    y += 24;
+
+    var cols = [
+      { key:'Ticket ID', w:88 }, { key:'First Name', w:88 }, { key:'Last Name', w:88 },
+      { key:"Driver's License", w:96 }, { key:'Amount', w:64 }, { key:'Status', w:64 },
+      { key:'Issue Date', w:78 }, { key:'Due Date', w:78 }
+    ];
+    function drawHeader(){
+      doc.setFillColor(27,75,114);
+      doc.rect(margin, y - 12, pageWidth - margin*2, 18, 'F');
+      doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor(255,255,255);
+      var x = margin + 4;
+      cols.forEach(function(c){ doc.text(c.key, x, y); x += c.w; });
+      y += 16;
+      doc.setFont('helvetica','normal'); doc.setTextColor(24,42,54);
+    }
+    drawHeader();
+    if (!rows.length) {
+      doc.setFont('helvetica','normal'); doc.setFontSize(10); doc.setTextColor(82,100,110);
+      doc.text('No tickets found for this period.', margin + 4, y + 6);
+    }
+    rows.forEach(function(r){
+      if (y > pageHeight - 50) { doc.addPage(); y = 50; drawHeader(); }
+      var x = margin + 4;
+      doc.setFontSize(9);
+      cols.forEach(function(c){
+        var val = c.key === 'Amount' ? fmtMoney(r[c.key]) : String(r[c.key] == null ? '' : r[c.key]);
+        if (val.length > 22) val = val.slice(0,21) + '…';
+        doc.text(val, x, y);
+        x += c.w;
+      });
+      y += 15;
+    });
+
+    doc.save('arab-tickets-' + fySlug() + '.pdf');
   }
 
   render();
