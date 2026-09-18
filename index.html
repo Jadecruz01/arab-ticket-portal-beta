@@ -1,0 +1,893 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>City of Arab Ticket Portal — Beta</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Arab Tickets">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#23405A">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,500;8..60,600;8..60,700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root {
+    --bg: #F4F6F4;
+    --surface: #FFFFFF;
+    --surface-alt: #E9EEE9;
+    --ink: #182A36;
+    --ink-soft: #52646E;
+    --primary: #1B4B72;
+    --primary-dark: #123350;
+    --accent: #4B7A45;
+    --accent-dark: #365B32;
+    --success: #3D7A5C;
+    --success-bg: #E4F0EA;
+    --danger: #A23B3B;
+    --danger-bg: #F6E6E6;
+    --border: #D7DDD5;
+    --serif: 'Source Serif 4', Georgia, 'Times New Roman', serif;
+    --sans: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #101C24; --surface: #182832; --surface-alt: #1E323D;
+      --ink: #E8ECE6; --ink-soft: #A2B2AC;
+      --primary: #6E9DC4; --primary-dark: #4B7CA3;
+      --accent: #8FBF83; --accent-dark: #6FA063;
+      --success: #85C1A1; --success-bg: #1D3128;
+      --danger: #E3928E; --danger-bg: #3A2323;
+      --border: #2D4048;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #101C24; --surface: #182832; --surface-alt: #1E323D;
+    --ink: #E8ECE6; --ink-soft: #A2B2AC;
+    --primary: #6E9DC4; --primary-dark: #4B7CA3;
+    --accent: #8FBF83; --accent-dark: #6FA063;
+    --success: #85C1A1; --success-bg: #1D3128;
+    --danger: #E3928E; --danger-bg: #3A2323;
+    --border: #2D4048;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+  }
+  #app { max-width: 560px; margin: 0 auto; padding-bottom: 64px; }
+
+  header.top {
+    position: sticky; top: 0; z-index: 20;
+    background: var(--surface);
+    color: var(--ink);
+    padding: 14px 18px 13px;
+    display: flex; align-items: center; gap: 12px;
+    border-bottom: 3px solid var(--accent);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  }
+  .seal {
+    width: 42px; height: 42px; flex: none;
+    border-radius: 50%;
+    background: var(--primary);
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--serif); font-weight: 700; font-size: 15px;
+    color: #F4F6F4;
+    border: 2px solid var(--accent);
+  }
+  .titleblock { flex: 1; min-width: 0; }
+  .titleblock .city { font-size: 11.5px; letter-spacing: 0.02em; color: var(--accent-dark); font-weight: 600; line-height: 1; }
+  .titleblock h1 {
+    font-family: var(--serif); font-weight: 600; font-size: 19px;
+    margin: 2px 0 0; line-height: 1.15;
+    color: var(--primary);
+  }
+  .beta-badge {
+    flex: none;
+    background: var(--surface-alt);
+    border: 1px solid var(--border);
+    color: var(--primary);
+    font-size: 11px; font-weight: 700;
+    padding: 3px 8px; border-radius: 20px;
+  }
+
+  nav.tabs {
+    display: flex; gap: 2px; margin: 14px 16px 0;
+    background: var(--surface-alt);
+    border-radius: 10px; padding: 3px;
+  }
+  nav.tabs button {
+    flex: 1; padding: 9px 6px; border: none; background: transparent;
+    font-family: var(--sans); font-size: 13.5px; font-weight: 600;
+    color: var(--ink-soft); border-radius: 8px; cursor: pointer;
+  }
+  nav.tabs button.active { background: var(--surface); color: var(--primary); box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+
+  main { padding: 18px 16px 0; }
+
+  .lede { color: var(--ink-soft); font-size: 14.5px; line-height: 1.5; margin: 4px 0 18px; }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px;
+    margin-bottom: 16px;
+    position: relative;
+  }
+  .card.slip { border-left: 4px solid var(--accent); }
+  .field { margin-bottom: 14px; }
+  .field:last-child { margin-bottom: 0; }
+  label { display: block; font-size: 12.5px; font-weight: 600; color: var(--ink-soft); margin-bottom: 5px; }
+  input, select, textarea {
+    width: 100%; font-family: var(--sans); font-size: 15px;
+    padding: 10px 12px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--bg); color: var(--ink);
+  }
+  input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .or-div { display:flex; align-items:center; gap:10px; margin: 16px 0; color: var(--ink-soft); font-size: 12.5px; }
+  .or-div::before, .or-div::after { content:""; flex:1; height:1px; background: var(--border); }
+
+  button.primary {
+    width: 100%; padding: 12px 16px; border: none; border-radius: 9px;
+    background: var(--primary); color: #FBF9F4; font-family: var(--sans);
+    font-size: 15px; font-weight: 600; cursor: pointer;
+  }
+  button.primary:active { background: var(--primary-dark); }
+  button.ghost {
+    width: 100%; padding: 11px 16px; border-radius: 9px; cursor: pointer;
+    background: transparent; border: 1px solid var(--border); color: var(--ink);
+    font-family: var(--sans); font-size: 14.5px; font-weight: 600;
+  }
+  button.link { background:none; border:none; color: var(--primary); font-weight:600; font-size: 13.5px; cursor:pointer; padding: 6px 0; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .ticket-hd { display:flex; justify-content: space-between; align-items:flex-start; gap: 10px; margin-bottom: 10px;}
+  .ticket-id { font-family: var(--serif); font-size: 17px; font-weight: 600; }
+  .status-pill { font-size: 11.5px; font-weight: 700; padding: 3px 9px; border-radius: 20px; white-space: nowrap; }
+  .status-unpaid { background: var(--danger-bg); color: var(--danger); }
+  .status-paid { background: var(--success-bg); color: var(--success); }
+  .status-overdue { background: var(--danger-bg); color: var(--danger); }
+  .kv { display: flex; justify-content: space-between; font-size: 14px; padding: 6px 0; border-bottom: 1px dashed var(--border); }
+  .kv:last-child { border-bottom: none; }
+  .kv .k { color: var(--ink-soft); }
+  .amount-line { display:flex; justify-content:space-between; align-items:baseline; margin: 14px 0 4px; }
+  .amount-line .amt { font-family: var(--serif); font-size: 28px; font-weight: 700; color: var(--primary); }
+
+  .empty { text-align:center; padding: 40px 20px; color: var(--ink-soft); }
+  .empty .big { font-size: 34px; margin-bottom: 8px; }
+
+  .paybtn-row { display:flex; flex-direction:column; gap: 10px; margin-bottom: 4px; }
+  .paybtn { border-radius: 9px; padding: 12px; font-size: 15.5px; font-weight: 600; cursor:pointer; border: none; display:flex; align-items:center; justify-content:center; gap:8px;}
+  .paybtn.apple { background:#000; color:#fff; }
+  .paybtn.google { background:#fff; color:#1F1F1F; border: 1px solid #DADCE0; }
+
+  .divider-label { text-align:center; color: var(--ink-soft); font-size: 12.5px; margin: 16px 0 12px; }
+
+  .banner { border-radius: 9px; padding: 11px 13px; font-size: 13px; line-height: 1.45; margin-bottom: 14px; }
+  .banner.beta { background: var(--surface-alt); color: var(--ink-soft); border: 1px solid var(--border); }
+  .banner.warn { background: var(--danger-bg); color: var(--danger); }
+  .banner.ok { background: var(--success-bg); color: var(--success); }
+
+  .success-icon { width:56px; height:56px; border-radius:50%; background: var(--success-bg); color: var(--success); display:flex; align-items:center; justify-content:center; font-size:28px; margin: 6px auto 14px; }
+
+  footer.betafoot { text-align:center; color: var(--ink-soft); font-size: 11.5px; padding: 20px 24px 10px; line-height: 1.5; }
+
+  .section-title { font-family: var(--serif); font-size: 16.5px; font-weight: 600; margin: 0 0 4px; }
+  .section-sub { color: var(--ink-soft); font-size: 12.5px; margin: 0 0 14px; }
+
+  table.admin-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  table.admin-table th, table.admin-table td { text-align:left; padding: 6px 6px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  .table-wrap { overflow-x: auto; margin-top: 10px; border: 1px solid var(--border); border-radius: 8px; }
+
+  .map-row { display:flex; align-items:center; gap: 10px; margin-bottom: 10px; }
+  .map-row .maplabel { width: 130px; flex: none; font-size: 13px; font-weight: 600; }
+  .maplabel .req { color: var(--danger); }
+
+  .toggle-row { display:flex; justify-content:space-between; align-items:center; padding: 10px 0; border-bottom: 1px dashed var(--border); }
+  .toggle-row:last-child { border-bottom:none; }
+  .comingsoon { font-size: 11px; font-weight:700; background: var(--surface-alt); color: var(--ink-soft); padding: 2px 8px; border-radius: 12px; }
+
+  .spinner { width:34px; height:34px; border-radius:50%; border: 3px solid var(--border); border-top-color: var(--primary); margin: 10px auto; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  a.backlink { color: var(--primary); font-weight:600; font-size: 13.5px; text-decoration:none; display:inline-block; margin-bottom: 12px; cursor:pointer;}
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ---------------- storage helpers ---------------- */
+  var LS = {
+    tickets: 'arab_tickets_v1',
+    map: 'arab_field_map_v1',
+    creds: 'arab_admin_creds_v1',
+    source: 'arab_source_v1',
+    bank: 'arab_bank_v1',
+    session: 'arab_admin_session_v1'
+  };
+
+  function load(key, fallback){
+    try { var v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; }
+    catch(e){ return fallback; }
+  }
+  function save(key, val){ try { localStorage.setItem(key, JSON.stringify(val)); } catch(e){} }
+
+  function defaultCreds(){ return { username: 'admin', password: 'arab2026' }; }
+  function defaultBank(){ return { processor: 'none', merchantName: 'City of Arab', connected: false }; }
+  function defaultMap(){
+    return { ticketId:'', firstName:'', lastName:'', dlNumber:'', violation:'', issueDate:'', dueDate:'', amount:'', status:'' };
+  }
+
+  var FIELD_DEFS = [
+    { key:'ticketId', label:'Ticket ID', required:true },
+    { key:'firstName', label:'First name', required:true },
+    { key:'lastName', label:'Last name', required:true },
+    { key:'dlNumber', label:"Driver's license #", required:true },
+    { key:'amount', label:'Amount due', required:true },
+    { key:'status', label:'Status', required:true },
+    { key:'violation', label:'Violation / description', required:false },
+    { key:'issueDate', label:'Issue date', required:false },
+    { key:'dueDate', label:'Due date', required:false }
+  ];
+
+  /* ---------------- state ---------------- */
+  var state = {
+    view: 'search',            // search | ticket | payment | success | adminLogin | adminDashboard
+    tickets: load(LS.tickets, []),
+    fieldMap: load(LS.map, defaultMap()),
+    creds: load(LS.creds, defaultCreds()),
+    source: load(LS.source, { type:'', sheetUrl:'', headers:[], rawRows:[], lastSync:'' }),
+    bank: load(LS.bank, defaultBank()),
+    isAdmin: !!load(LS.session, false),
+    activeTicket: null,
+    lastConfirmation: null,
+    searchError: '',
+    adminError: '',
+    syncStatus: '',
+    adminTab: 'source' // source | mapping | data | payments | account
+  };
+
+  function setView(v){ state.view = v; state.searchError=''; render(); window.scrollTo(0,0); }
+
+  /* ---------------- helpers ---------------- */
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+  function norm(s){ return String(s==null?'':s).trim().toLowerCase(); }
+  function fmtMoney(v){
+    var n = parseFloat(String(v).replace(/[^0-9.\-]/g,''));
+    if (isNaN(n)) return '$0.00';
+    return '$' + n.toFixed(2);
+  }
+  function statusClass(s){
+    var n = norm(s);
+    if (n.indexOf('paid') === 0) return 'status-paid';
+    if (n.indexOf('overdue') === 0) return 'status-overdue';
+    return 'status-unpaid';
+  }
+  function isPaid(s){ return norm(s).indexOf('paid') === 0 && norm(s).indexOf('unpaid') !== 0; }
+
+  /* apply the field map to raw rows -> ticket objects */
+  function rebuildTicketsFromSource(){
+    var map = state.fieldMap, rows = state.source.rawRows || [];
+    if (!map.ticketId && !(map.firstName && map.lastName && map.dlNumber)) { return; }
+    var out = [];
+    rows.forEach(function(row, idx){
+      var t = { _row: idx };
+      FIELD_DEFS.forEach(function(f){
+        var col = map[f.key];
+        t[f.key] = col ? (row[col] != null ? String(row[col]).trim() : '') : '';
+      });
+      if (!t.status) t.status = 'Unpaid';
+      if (t.ticketId || (t.firstName && t.lastName)) out.push(t);
+    });
+    state.tickets = out;
+    save(LS.tickets, out);
+  }
+
+  /* ---------------- search ---------------- */
+  function runSearch(q){
+    var byId = norm(q.ticketId);
+    var fn = norm(q.firstName), ln = norm(q.lastName), dl = norm(q.dlNumber);
+    var hasId = !!byId;
+    var hasName = fn && ln && dl;
+    if (!hasId && !hasName) {
+      state.searchError = "Enter a ticket ID, or your first name, last name, and driver's license number.";
+      return [];
+    }
+    state.searchError = '';
+    return state.tickets.filter(function(t){
+      var idMatch = hasId && norm(t.ticketId) === byId;
+      var nameMatch = hasName && norm(t.firstName) === fn && norm(t.lastName) === ln && norm(t.dlNumber) === dl;
+      return idMatch || nameMatch;
+    });
+  }
+
+  /* ---------------- render root ---------------- */
+  function render(){
+    var el = document.getElementById('app');
+    el.innerHTML = header() + body() + footerHtml();
+    bind();
+  }
+
+  function header(){
+    var tabsHtml = '';
+    if (state.view !== 'adminLogin') {
+      tabsHtml =
+        '<nav class="tabs">' +
+          '<button data-tab="public" class="'+(state.view!=='adminLogin' && state.view!=='adminDashboard' ? 'active':'')+'">Look up a ticket</button>' +
+          '<button data-tab="admin" class="'+(state.view==='adminDashboard'?'active':'')+'">'+(state.isAdmin?'Admin':'Admin login')+'</button>' +
+        '</nav>';
+    }
+    return (
+      '<header class="top">' +
+        '<div class="seal">AR</div>' +
+        '<div class="titleblock">' +
+          '<div class="city">CITY OF ARAB, ALABAMA</div>' +
+          '<h1>Arab Ticket Portal</h1>' +
+        '</div>' +
+        '<div class="beta-badge">BETA</div>' +
+      '</header>' + tabsHtml
+    );
+  }
+
+  function footerHtml(){
+    return '<footer class="betafoot">Arab Ticket Portal — Beta version 0.1. This is a preview build for the City of Arab. Data shown may be test data, and payments are simulated until a payment processor is connected.</footer>';
+  }
+
+  function body(){
+    switch(state.view){
+      case 'search': return viewSearch();
+      case 'ticket': return viewTicket();
+      case 'payment': return viewPayment();
+      case 'success': return viewSuccess();
+      case 'adminLogin': return viewAdminLogin();
+      case 'adminDashboard': return viewAdminDashboard();
+      default: return viewSearch();
+    }
+  }
+
+  /* ---------------- PUBLIC: search ---------------- */
+  function viewSearch(){
+    var results = state._lastResults || null;
+    var html = '<main>';
+    html += '<p class="lede">Look up a citation using your ticket ID, or your first name, last name, and driver\'s license number.</p>';
+    html += '<div class="card slip">';
+    html += '<div class="field"><label for="f-ticketid">Ticket ID</label><input id="f-ticketid" placeholder="e.g. AR-10234" value="'+esc(state._q_ticketId||'')+'"></div>';
+    html += '<div class="or-div">OR SEARCH BY NAME</div>';
+    html += '<div class="row2">';
+    html += '<div class="field"><label for="f-first">First name</label><input id="f-first" value="'+esc(state._q_first||'')+'"></div>';
+    html += '<div class="field"><label for="f-last">Last name</label><input id="f-last" value="'+esc(state._q_last||'')+'"></div>';
+    html += '</div>';
+    html += '<div class="field"><label for="f-dl">Driver\'s license #</label><input id="f-dl" value="'+esc(state._q_dl||'')+'"></div>';
+    if (state.searchError) html += '<div class="banner warn" style="margin-top:12px;">'+esc(state.searchError)+'</div>';
+    html += '<div style="margin-top:14px;"><button class="primary" id="btn-search">Search</button></div>';
+    html += '</div>';
+
+    if (state.tickets.length === 0) {
+      html += '<div class="banner beta">No ticket data is loaded yet. An administrator needs to connect a spreadsheet in Admin before searches will return results.</div>';
+    }
+
+    if (results !== null) {
+      if (results.length === 0) {
+        html += '<div class="empty"><div class="big">🔍</div>No matching ticket found. Double-check the ticket ID or your name and driver\'s license number.</div>';
+      } else {
+        results.forEach(function(t){
+          html += ticketSummaryCard(t);
+        });
+      }
+    }
+    html += '</main>';
+    return html;
+  }
+
+  function ticketSummaryCard(t){
+    var cls = statusClass(t.status);
+    var label = isPaid(t.status) ? 'Paid' : (cls==='status-overdue' ? 'Overdue' : 'Unpaid');
+    return (
+      '<div class="card slip" data-open-ticket="'+esc(t._row)+'" style="cursor:pointer;">' +
+        '<div class="ticket-hd"><span class="ticket-id">'+esc(t.ticketId||'—')+'</span><span class="status-pill '+cls+'">'+label+'</span></div>' +
+        '<div class="kv"><span class="k">Name</span><span>'+esc(t.firstName)+' '+esc(t.lastName)+'</span></div>' +
+        (t.violation ? '<div class="kv"><span class="k">Violation</span><span>'+esc(t.violation)+'</span></div>' : '') +
+        '<div class="kv"><span class="k">Amount due</span><span>'+ (isPaid(t.status) ? '—' : fmtMoney(t.amount)) +'</span></div>' +
+        '<div style="margin-top:12px;"><button class="ghost">View ticket →</button></div>' +
+      '</div>'
+    );
+  }
+
+  /* ---------------- PUBLIC: ticket detail ---------------- */
+  function viewTicket(){
+    var t = state.activeTicket;
+    if (!t) { setView('search'); return ''; }
+    var cls = statusClass(t.status);
+    var paid = isPaid(t.status);
+    var label = paid ? 'Paid' : (cls==='status-overdue' ? 'Overdue' : 'Unpaid');
+    var html = '<main>';
+    html += '<a class="backlink" data-back="search">← Back to search</a>';
+    html += '<div class="card slip">';
+    html += '<div class="ticket-hd"><span class="ticket-id">Citation '+esc(t.ticketId||'—')+'</span><span class="status-pill '+cls+'">'+label+'</span></div>';
+    html += '<div class="kv"><span class="k">Name</span><span>'+esc(t.firstName)+' '+esc(t.lastName)+'</span></div>';
+    html += '<div class="kv"><span class="k">Driver\'s license</span><span>'+esc(t.dlNumber||'—')+'</span></div>';
+    if (t.violation) html += '<div class="kv"><span class="k">Violation</span><span>'+esc(t.violation)+'</span></div>';
+    if (t.issueDate) html += '<div class="kv"><span class="k">Issue date</span><span>'+esc(t.issueDate)+'</span></div>';
+    if (t.dueDate) html += '<div class="kv"><span class="k">Due date</span><span>'+esc(t.dueDate)+'</span></div>';
+    html += '<div class="amount-line"><span class="k">'+(paid?'Amount paid':'Amount due')+'</span><span class="amt">'+fmtMoney(t.amount)+'</span></div>';
+    html += '</div>';
+
+    if (paid) {
+      html += '<div class="banner ok">This citation shows as paid. If you believe this is an error, contact the City of Arab municipal court.</div>';
+    } else {
+      html += '<button class="primary" id="btn-pay">Pay '+fmtMoney(t.amount)+'</button>';
+    }
+    html += '</main>';
+    return html;
+  }
+
+  /* ---------------- PUBLIC: payment ---------------- */
+  function viewPayment(){
+    var t = state.activeTicket;
+    if (!t) { setView('search'); return ''; }
+    var html = '<main>';
+    html += '<a class="backlink" data-back="ticket">← Back to citation</a>';
+    html += '<div class="banner beta">Beta preview — payments made here are simulated. No card is charged and no funds are collected until the City connects a live payment processor.</div>';
+    html += '<div class="card slip">';
+    html += '<div class="ticket-hd"><span class="ticket-id">Citation '+esc(t.ticketId)+'</span></div>';
+    html += '<div class="amount-line"><span class="k">Total due</span><span class="amt">'+fmtMoney(t.amount)+'</span></div>';
+    html += '</div>';
+
+    html += '<div class="card">';
+    html += '<div class="section-title">Pay with wallet</div>';
+    html += '<div class="section-sub">Fastest option if your device supports it.</div>';
+    html += '<div class="paybtn-row">';
+    html += '<button class="paybtn apple" id="btn-applepay"> Pay with Apple Pay</button>';
+    html += '<button class="paybtn google" id="btn-googlepay">Pay with Google Pay</button>';
+    html += '</div>';
+    html += '</div>';
+
+    html += '<div class="divider-label">— or enter card details —</div>';
+
+    html += '<div class="card">';
+    html += '<form id="card-form">';
+    html += '<div class="field"><label for="cc-name">Name on card</label><input id="cc-name" required></div>';
+    html += '<div class="field"><label for="cc-number">Card number</label><input id="cc-number" inputmode="numeric" maxlength="19" placeholder="1234 5678 9012 3456" required></div>';
+    html += '<div class="row2">';
+    html += '<div class="field"><label for="cc-exp">Expiry (MM/YY)</label><input id="cc-exp" inputmode="numeric" maxlength="5" placeholder="MM/YY" required></div>';
+    html += '<div class="field"><label for="cc-cvc">CVC</label><input id="cc-cvc" inputmode="numeric" maxlength="4" placeholder="123" required></div>';
+    html += '</div>';
+    html += '<div class="field"><label for="cc-zip">Billing ZIP code</label><input id="cc-zip" inputmode="numeric" maxlength="10" required></div>';
+    html += '<div id="card-error" class="banner warn" style="display:none;"></div>';
+    html += '<button type="submit" class="primary" style="margin-top:6px;">Pay '+fmtMoney(t.amount)+'</button>';
+    html += '</form>';
+    html += '</div>';
+    html += '</main>';
+    return html;
+  }
+
+  function viewSuccess(){
+    var t = state.activeTicket;
+    var html = '<main>';
+    html += '<div class="card slip" style="text-align:center;">';
+    html += '<div class="success-icon">✓</div>';
+    html += '<div class="section-title" style="text-align:center;">Payment simulated</div>';
+    html += '<div class="section-sub" style="text-align:center;">Confirmation #'+esc(state.lastConfirmation)+'</div>';
+    if (t) html += '<div class="kv"><span class="k">Citation</span><span>'+esc(t.ticketId)+'</span></div>';
+    if (t) html += '<div class="kv"><span class="k">Amount</span><span>'+fmtMoney(t.amount)+'</span></div>';
+    html += '</div>';
+    html += '<div class="banner beta">This is a beta demonstration. Because no payment processor or bank account is connected yet, no real charge occurred — the ticket status was updated locally for testing.</div>';
+    html += '<button class="ghost" id="btn-newsearch">Search another ticket</button>';
+    html += '</main>';
+    return html;
+  }
+
+  /* ---------------- ADMIN: login ---------------- */
+  function viewAdminLogin(){
+    var html = '<main>';
+    html += '<div class="card slip">';
+    html += '<div class="section-title">Admin login</div>';
+    html += '<div class="section-sub">Restricted to City of Arab staff. Beta build — default credentials should be changed before real citation data is loaded.</div>';
+    html += '<div class="field"><label for="au">Username</label><input id="au" autocapitalize="off"></div>';
+    html += '<div class="field"><label for="ap">Password</label><input id="ap" type="password"></div>';
+    if (state.adminError) html += '<div class="banner warn">'+esc(state.adminError)+'</div>';
+    html += '<button class="primary" id="btn-adminlogin" style="margin-top:6px;">Log in</button>';
+    html += '</div>';
+    html += '<div class="banner beta">Demo credentials: <strong>admin</strong> / <strong>arab2026</strong>. Change these in Admin → Account after logging in.</div>';
+    html += '</main>';
+    return html;
+  }
+
+  /* ---------------- ADMIN: dashboard ---------------- */
+  function adminSubtabs(){
+    var tabs = [
+      ['source','Spreadsheet'], ['mapping','Field mapping'], ['data','Ticket data'],
+      ['payments','Payments'], ['account','Account']
+    ];
+    var html = '<div style="display:flex;gap:6px;overflow-x:auto;margin-bottom:16px;padding-bottom:2px;">';
+    tabs.forEach(function(tb){
+      var active = state.adminTab === tb[0];
+      html += '<button data-admintab="'+tb[0]+'" style="flex:none;padding:8px 12px;border-radius:20px;border:1px solid var(--border);font-size:12.5px;font-weight:600;cursor:pointer;background:'+(active?'var(--primary)':'var(--surface)')+';color:'+(active?'#FBF9F4':'var(--ink)')+';">'+tb[1]+'</button>';
+    });
+    html += '</div>';
+    return html;
+  }
+
+  function viewAdminDashboard(){
+    var html = '<main>';
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">';
+    html += '<div class="section-title" style="margin:0;">Admin — beta</div>';
+    html += '<button class="link" id="btn-logout">Log out</button>';
+    html += '</div>';
+    html += adminSubtabs();
+
+    if (state.adminTab === 'source') html += adminSource();
+    else if (state.adminTab === 'mapping') html += adminMapping();
+    else if (state.adminTab === 'data') html += adminData();
+    else if (state.adminTab === 'payments') html += adminPayments();
+    else if (state.adminTab === 'account') html += adminAccount();
+
+    html += '</main>';
+    return html;
+  }
+
+  function adminSource(){
+    var s = state.source;
+    var html = '<div class="card">';
+    html += '<div class="section-title">Connect a Google Sheet</div>';
+    html += '<div class="section-sub">In Google Sheets: File → Share → Publish to web → select the ticket sheet → CSV, then paste that link below.</div>';
+    html += '<div class="field"><label for="sheet-url">Published CSV link</label><input id="sheet-url" placeholder="https://docs.google.com/.../pub?output=csv" value="'+esc(s.sheetUrl||'')+'"></div>';
+    html += '<button class="primary" id="btn-fetch-sheet">Fetch &amp; sync from link</button>';
+    html += '<div class="banner beta" style="margin-top:12px;">If your network or this browser blocks the live fetch, use the file upload or paste option below instead — both work fully offline.</div>';
+    html += '</div>';
+
+    html += '<div class="card">';
+    html += '<div class="section-title">Or upload a file</div>';
+    html += '<div class="section-sub">Accepts .csv or .xlsx exported from Google Sheets or Excel.</div>';
+    html += '<input type="file" id="file-upload" accept=".csv,.xlsx,.xls">';
+    html += '</div>';
+
+    html += '<div class="card">';
+    html += '<div class="section-title">Or paste CSV data</div>';
+    html += '<textarea id="csv-paste" rows="5" placeholder="Ticket ID,First Name,Last Name,..."></textarea>';
+    html += '<button class="ghost" id="btn-paste-sync" style="margin-top:10px;">Parse pasted data</button>';
+    html += '</div>';
+
+    if (state.syncStatus) html += '<div class="banner '+(state.syncStatus.ok?'ok':'warn')+'">'+esc(state.syncStatus.msg)+'</div>';
+    if (s.lastSync) html += '<div class="banner beta">Last synced: '+esc(s.lastSync)+' · '+ (s.headers||[]).length +' columns detected · '+ state.tickets.length +' tickets loaded.</div>';
+    return html;
+  }
+
+  function adminMapping(){
+    var headers = state.source.headers || [];
+    var html = '<div class="card">';
+    html += '<div class="section-title">Field mapping</div>';
+    html += '<div class="section-sub">Tell the app which spreadsheet column feeds each app field. Sync a spreadsheet first so columns appear here.</div>';
+    if (headers.length === 0) {
+      html += '<div class="banner beta">No columns detected yet — go to Spreadsheet and sync a source first.</div>';
+    } else {
+      FIELD_DEFS.forEach(function(f){
+        html += '<div class="map-row"><div class="maplabel">'+esc(f.label)+(f.required?' <span class="req">*</span>':'')+'</div>';
+        html += '<select data-mapfield="'+f.key+'" style="flex:1;">';
+        html += '<option value="">— not used —</option>';
+        headers.forEach(function(h){
+          var sel = state.fieldMap[f.key] === h ? 'selected' : '';
+          html += '<option value="'+esc(h)+'" '+sel+'>'+esc(h)+'</option>';
+        });
+        html += '</select></div>';
+      });
+      html += '<button class="primary" id="btn-save-map" style="margin-top:8px;">Save mapping &amp; rebuild tickets</button>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  function adminData(){
+    var html = '<div class="card">';
+    html += '<div class="section-title">Loaded tickets ('+state.tickets.length+')</div>';
+    html += '<div class="section-sub">Read-only preview of what the public search will use.</div>';
+    if (state.tickets.length === 0) {
+      html += '<div class="banner beta">No tickets loaded yet.</div>';
+    } else {
+      html += '<div class="table-wrap"><table class="admin-table"><thead><tr>' +
+        '<th>Ticket ID</th><th>First</th><th>Last</th><th>DL #</th><th>Amount</th><th>Status</th>' +
+        '</tr></thead><tbody>';
+      state.tickets.slice(0,200).forEach(function(t){
+        html += '<tr><td>'+esc(t.ticketId)+'</td><td>'+esc(t.firstName)+'</td><td>'+esc(t.lastName)+'</td><td>'+esc(t.dlNumber)+'</td><td>'+fmtMoney(t.amount)+'</td><td>'+esc(t.status)+'</td></tr>';
+      });
+      html += '</tbody></table></div>';
+      if (state.tickets.length > 200) html += '<div class="section-sub" style="margin-top:8px;">Showing first 200 of '+state.tickets.length+'.</div>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  function adminPayments(){
+    var b = state.bank;
+    var html = '<div class="card">';
+    html += '<div class="section-title">Payment processing</div>';
+    html += '<div class="section-sub">Wallet buttons (Apple Pay / Google Pay) and the card form are live in the app, but transactions are simulated until a processor is connected here.</div>';
+    html += '<div class="toggle-row"><span>Bank account / merchant account</span><span class="comingsoon">Coming soon</span></div>';
+    html += '<div class="toggle-row"><span>Apple Pay merchant setup</span><span class="comingsoon">Coming soon</span></div>';
+    html += '<div class="toggle-row"><span>Google Pay merchant setup</span><span class="comingsoon">Coming soon</span></div>';
+    html += '</div>';
+
+    html += '<div class="card">';
+    html += '<div class="field"><label for="merch-name">Merchant name shown to residents</label><input id="merch-name" value="'+esc(b.merchantName||'City of Arab')+'"></div>';
+    html += '<div class="field"><label for="proc-select">Planned payment processor</label>';
+    html += '<select id="proc-select">';
+    ['none','Stripe','Square','Authorize.net','Other'].forEach(function(p){
+      html += '<option value="'+p+'" '+(b.processor===p?'selected':'')+'>'+(p==='none'?'Not selected yet':p)+'</option>';
+    });
+    html += '</select></div>';
+    html += '<button class="ghost" id="btn-save-bank">Save payment settings</button>';
+    html += '</div>';
+    return html;
+  }
+
+  function adminAccount(){
+    var html = '<div class="card">';
+    html += '<div class="section-title">Admin account</div>';
+    html += '<div class="section-sub">Change the beta login credentials. This is a client-side demo login only — a production launch will need a real authentication backend.</div>';
+    html += '<div class="field"><label for="new-user">Username</label><input id="new-user" value="'+esc(state.creds.username)+'"></div>';
+    html += '<div class="field"><label for="new-pass">New password</label><input id="new-pass" type="password" placeholder="Leave blank to keep current"></div>';
+    html += '<button class="primary" id="btn-save-account">Save account</button>';
+    html += '</div>';
+    return html;
+  }
+
+  /* ---------------- parsing ---------------- */
+  function applyParsedRows(headers, rows, sourceType){
+    state.source.headers = headers;
+    state.source.rawRows = rows;
+    state.source.type = sourceType;
+    state.source.lastSync = new Date().toLocaleString();
+    save(LS.source, state.source);
+
+    // auto-guess mapping the first time headers appear, only for unset fields
+    FIELD_DEFS.forEach(function(f){
+      if (!state.fieldMap[f.key]) {
+        var guess = headers.find(function(h){
+          var hn = norm(h).replace(/[^a-z0-9]/g,'');
+          var target = f.key.toLowerCase();
+          if (f.key === 'ticketId') return /ticket|citation/.test(hn) && /id|no|number|#/.test(hn) || hn === 'ticketid';
+          if (f.key === 'dlNumber') return /license|dl/.test(hn);
+          if (f.key === 'firstName') return hn.indexOf('first') === 0;
+          if (f.key === 'lastName') return hn.indexOf('last') === 0;
+          if (f.key === 'amount') return /amount|due|fine|total/.test(hn);
+          if (f.key === 'status') return hn === 'status';
+          if (f.key === 'violation') return /violation|description|offense/.test(hn);
+          if (f.key === 'issueDate') return /issue|citationdate|date/.test(hn) && !/due/.test(hn);
+          if (f.key === 'dueDate') return /due/.test(hn);
+          return false;
+        });
+        if (guess) state.fieldMap[f.key] = guess;
+      }
+    });
+    save(LS.map, state.fieldMap);
+    rebuildTicketsFromSource();
+    state.syncStatus = { ok:true, msg: 'Synced '+rows.length+' rows, '+headers.length+' columns. Review Field mapping to confirm each app field is mapped correctly.' };
+    state.adminTab = 'mapping';
+  }
+
+  function parseCsvText(text, sourceType){
+    var parsed = Papa.parse(text, { header:true, skipEmptyLines:true });
+    var headers = parsed.meta && parsed.meta.fields ? parsed.meta.fields : [];
+    applyParsedRows(headers, parsed.data, sourceType);
+    render();
+  }
+
+  /* ---------------- event binding ---------------- */
+  function bind(){
+    var el = document.getElementById('app');
+
+    var tabPublic = el.querySelector('[data-tab="public"]');
+    var tabAdmin = el.querySelector('[data-tab="admin"]');
+    if (tabPublic) tabPublic.onclick = function(){ setView('search'); };
+    if (tabAdmin) tabAdmin.onclick = function(){ setView(state.isAdmin ? 'adminDashboard' : 'adminLogin'); };
+
+    var back = el.querySelector('[data-back]');
+    if (back) back.onclick = function(){ setView(back.getAttribute('data-back')); };
+
+    /* search */
+    var btnSearch = document.getElementById('btn-search');
+    if (btnSearch) btnSearch.onclick = function(){
+      state._q_ticketId = document.getElementById('f-ticketid').value;
+      state._q_first = document.getElementById('f-first').value;
+      state._q_last = document.getElementById('f-last').value;
+      state._q_dl = document.getElementById('f-dl').value;
+      state._lastResults = runSearch({ ticketId: state._q_ticketId, firstName: state._q_first, lastName: state._q_last, dlNumber: state._q_dl });
+      render();
+    };
+    el.querySelectorAll('[data-open-ticket]').forEach(function(node){
+      node.onclick = function(){
+        var row = node.getAttribute('data-open-ticket');
+        var t = state.tickets.find(function(x){ return String(x._row) === row; });
+        if (t) { state.activeTicket = t; setView('ticket'); }
+      };
+    });
+
+    var btnPay = document.getElementById('btn-pay');
+    if (btnPay) btnPay.onclick = function(){ setView('payment'); };
+
+    var btnApple = document.getElementById('btn-applepay');
+    var btnGoogle = document.getElementById('btn-googlepay');
+    if (btnApple) btnApple.onclick = function(){ simulateWalletPay('Apple Pay'); };
+    if (btnGoogle) btnGoogle.onclick = function(){ simulateWalletPay('Google Pay'); };
+
+    var cardForm = document.getElementById('card-form');
+    if (cardForm) {
+      var ccNumber = document.getElementById('cc-number');
+      ccNumber.addEventListener('input', function(){
+        var digits = ccNumber.value.replace(/\D/g,'').slice(0,16);
+        ccNumber.value = digits.replace(/(.{4})/g,'$1 ').trim();
+      });
+      var ccExp = document.getElementById('cc-exp');
+      ccExp.addEventListener('input', function(){
+        var digits = ccExp.value.replace(/\D/g,'').slice(0,4);
+        if (digits.length >= 3) digits = digits.slice(0,2) + '/' + digits.slice(2);
+        ccExp.value = digits;
+      });
+      cardForm.onsubmit = function(e){
+        e.preventDefault();
+        var errBox = document.getElementById('card-error');
+        var num = ccNumber.value.replace(/\s/g,'');
+        var exp = ccExp.value;
+        var cvc = document.getElementById('cc-cvc').value;
+        var zip = document.getElementById('cc-zip').value;
+        var err = '';
+        if (num.length < 13 || num.length > 16) err = 'Enter a valid card number.';
+        else if (!/^\d{2}\/\d{2}$/.test(exp)) err = 'Enter expiry as MM/YY.';
+        else if (cvc.length < 3) err = 'Enter a valid CVC.';
+        else if (zip.length < 3) err = 'Enter a valid billing ZIP code.';
+        if (err) { errBox.style.display='block'; errBox.textContent = err; return; }
+        errBox.style.display = 'none';
+        processSimulatedPayment();
+      };
+    }
+
+    var btnNew = document.getElementById('btn-newsearch');
+    if (btnNew) btnNew.onclick = function(){ state._lastResults = null; setView('search'); };
+
+    /* admin login */
+    var btnAdminLogin = document.getElementById('btn-adminlogin');
+    if (btnAdminLogin) btnAdminLogin.onclick = function(){
+      var u = document.getElementById('au').value;
+      var p = document.getElementById('ap').value;
+      if (u === state.creds.username && p === state.creds.password) {
+        state.isAdmin = true; save(LS.session, true);
+        state.adminError = '';
+        setView('adminDashboard');
+      } else {
+        state.adminError = 'Incorrect username or password.';
+        render();
+      }
+    };
+
+    var btnLogout = document.getElementById('btn-logout');
+    if (btnLogout) btnLogout.onclick = function(){ state.isAdmin = false; save(LS.session, false); setView('search'); };
+
+    el.querySelectorAll('[data-admintab]').forEach(function(node){
+      node.onclick = function(){ state.adminTab = node.getAttribute('data-admintab'); state.syncStatus=''; render(); };
+    });
+
+    var btnFetchSheet = document.getElementById('btn-fetch-sheet');
+    if (btnFetchSheet) btnFetchSheet.onclick = function(){
+      var url = document.getElementById('sheet-url').value.trim();
+      if (!url) return;
+      state.source.sheetUrl = url; save(LS.source, state.source);
+      state.syncStatus = { ok:true, msg:'Fetching…' }; render();
+      fetch(url).then(function(r){
+        if (!r.ok) throw new Error('Request failed ('+r.status+')');
+        return r.text();
+      }).then(function(text){
+        parseCsvText(text, 'google-sheet');
+      }).catch(function(err){
+        state.syncStatus = { ok:false, msg: "Couldn't fetch that link directly (" + err.message + "). This can happen if the sheet isn't published to the web, or if this browser blocks the request. Try the file upload or paste-CSV option below instead." };
+        render();
+      });
+    };
+
+    var fileUpload = document.getElementById('file-upload');
+    if (fileUpload) fileUpload.onchange = function(){
+      var file = fileUpload.files[0];
+      if (!file) return;
+      var isCsv = /\.csv$/i.test(file.name);
+      var reader = new FileReader();
+      reader.onload = function(e){
+        if (isCsv) {
+          parseCsvText(e.target.result, 'file-csv');
+        } else {
+          var data = new Uint8Array(e.target.result);
+          var wb = XLSX.read(data, { type:'array' });
+          var firstSheet = wb.Sheets[wb.SheetNames[0]];
+          var rows = XLSX.utils.sheet_to_json(firstSheet, { defval:'' });
+          var headers = rows.length ? Object.keys(rows[0]) : [];
+          applyParsedRows(headers, rows, 'file-xlsx');
+          render();
+        }
+      };
+      if (isCsv) reader.readAsText(file); else reader.readAsArrayBuffer(file);
+    };
+
+    var btnPasteSync = document.getElementById('btn-paste-sync');
+    if (btnPasteSync) btnPasteSync.onclick = function(){
+      var text = document.getElementById('csv-paste').value;
+      if (!text.trim()) return;
+      parseCsvText(text, 'paste');
+    };
+
+    var btnSaveMap = document.getElementById('btn-save-map');
+    if (btnSaveMap) btnSaveMap.onclick = function(){
+      FIELD_DEFS.forEach(function(f){
+        var sel = document.querySelector('[data-mapfield="'+f.key+'"]');
+        if (sel) state.fieldMap[f.key] = sel.value;
+      });
+      save(LS.map, state.fieldMap);
+      rebuildTicketsFromSource();
+      state.syncStatus = { ok:true, msg:'Mapping saved. '+state.tickets.length+' tickets are now available to search.' };
+      state.adminTab = 'data';
+      render();
+    };
+
+    var btnSaveBank = document.getElementById('btn-save-bank');
+    if (btnSaveBank) btnSaveBank.onclick = function(){
+      state.bank.merchantName = document.getElementById('merch-name').value;
+      state.bank.processor = document.getElementById('proc-select').value;
+      save(LS.bank, state.bank);
+      state.syncStatus = { ok:true, msg:'Payment settings saved. Connect a real processor and bank account before going live.' };
+      render();
+    };
+
+    var btnSaveAccount = document.getElementById('btn-save-account');
+    if (btnSaveAccount) btnSaveAccount.onclick = function(){
+      var u = document.getElementById('new-user').value.trim();
+      var p = document.getElementById('new-pass').value;
+      if (u) state.creds.username = u;
+      if (p) state.creds.password = p;
+      save(LS.creds, state.creds);
+      state.syncStatus = { ok:true, msg:'Account updated.' };
+      render();
+    };
+  }
+
+  function simulateWalletPay(which){
+    var t = state.activeTicket;
+    var el = document.getElementById('app');
+    var overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);display:flex;align-items:flex-end;z-index:50;';
+    overlay.innerHTML =
+      '<div style="background:var(--surface);width:100%;border-radius:16px 16px 0 0;padding:22px 20px 26px;text-align:center;">' +
+      '<div class="section-title">'+which+' — beta preview</div>' +
+      '<div class="spinner"></div>' +
+      '<div class="section-sub">Simulating a '+which+' sheet for '+fmtMoney(t.amount)+'…</div>' +
+      '</div>';
+    document.body.appendChild(overlay);
+    setTimeout(function(){
+      document.body.removeChild(overlay);
+      processSimulatedPayment();
+    }, 1400);
+  }
+
+  function processSimulatedPayment(){
+    var t = state.activeTicket;
+    t.status = 'Paid';
+    var idx = state.tickets.findIndex(function(x){ return x._row === t._row; });
+    if (idx > -1) state.tickets[idx] = t;
+    save(LS.tickets, state.tickets);
+    state.lastConfirmation = 'ARAB-' + Math.random().toString(36).slice(2,8).toUpperCase();
+    setView('success');
+  }
+
+  render();
+})();
+</script>
+</body>
+</html>
