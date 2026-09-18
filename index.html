@@ -413,13 +413,6 @@
   }
 
   function header(){
-    var tabsHtml = '';
-    if (state.view !== 'adminLogin' && state.view !== 'adminDashboard') {
-      tabsHtml =
-        '<nav class="tabs">' +
-          '<button data-tab="public" class="active">Look up a ticket</button>' +
-        '</nav>';
-    }
     return (
       '<header class="top">' +
         '<div class="titleblock">' +
@@ -427,7 +420,7 @@
           '<h1>Ticket Portal</h1>' +
         '</div>' +
         '<div class="beta-badge">BETA</div>' +
-      '</header>' + tabsHtml
+      '</header>'
     );
   }
 
@@ -885,9 +878,6 @@
   /* ---------------- event binding ---------------- */
   function bind(){
     var el = document.getElementById('app');
-
-    var tabPublic = el.querySelector('[data-tab="public"]');
-    if (tabPublic) tabPublic.onclick = function(){ setView('search'); };
 
     var btnAdminFooter = document.getElementById('btn-admin-footer');
     if (btnAdminFooter) btnAdminFooter.onclick = function(){
