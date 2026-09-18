@@ -228,8 +228,7 @@
     map: 'arab_field_map_v1',
     source: 'arab_source_v1',
     bank: 'arab_bank_v1',
-    session: 'arab_admin_session_v2',
-    autosync: 'arab_last_autosync_v1'
+    session: 'arab_admin_session_v2'
   };
 
   function load(key, fallback){
@@ -419,11 +418,15 @@
     var total = list.length;
     var paidCount = list.filter(function(t){ return isPaid(t.status); }).length;
     var unpaidCount = total - paidCount;
-    var collected = list.filter(function(t){ return isPaid(t.status); }).reduce(function(sum,t){
-      var n = parseFloat(String(t.amount).replace(/[^0-9.\-]/g,''));
-      return sum + (isNaN(n) ? 0 : n);
-    }, 0);
-    return { total: total, paid: paidCount, unpaid: unpaidCount, collected: collected };
+    function sumAmounts(rows){
+      return rows.reduce(function(sum,t){
+        var n = parseFloat(String(t.amount).replace(/[^0-9.\-]/g,''));
+        return sum + (isNaN(n) ? 0 : n);
+      }, 0);
+    }
+    var collected = sumAmounts(list.filter(function(t){ return isPaid(t.status); }));
+    var outstanding = sumAmounts(list.filter(function(t){ return !isPaid(t.status); }));
+    return { total: total, paid: paidCount, unpaid: unpaidCount, collected: collected, outstanding: outstanding };
   }
   function ticketExportRows(list){
     return list.map(function(t){
@@ -715,11 +718,14 @@
     html += '<button class="ghost" id="btn-fy-export-pdf" style="width:auto;padding:8px 12px;font-size:12.5px;">Export PDF</button>';
     html += '</div>';
     html += '</div>';
-    html += '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:4px;">';
+    html += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px;">';
     html += statTile('Total tickets', stats.total);
     html += statTile('Paid', stats.paid);
     html += statTile('Unpaid / overdue', stats.unpaid);
+    html += '</div>';
+    html += '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:4px;margin-top:4px;border-top:1px solid var(--border);padding-top:4px;">';
     html += statTile('Total collected', fmtMoney(stats.collected));
+    html += statTile('Not yet collected', fmtMoney(stats.outstanding));
     html += '</div>';
     html += '</div>';
     return html;
@@ -755,7 +761,7 @@
     html += '<div class="section-sub">In Google Sheets: File → Share → Publish to web → select the ticket sheet → CSV, then paste that link below.</div>';
     html += '<div class="field"><label for="sheet-url">Published CSV link</label><input id="sheet-url" placeholder="https://docs.google.com/.../pub?output=csv" value="'+esc(s.sheetUrl||'')+'"></div>';
     html += '<button class="primary" id="btn-fetch-sheet">Fetch &amp; sync from link</button>';
-    html += '<div class="banner beta" style="margin-top:12px;">Once a link is saved here, this browser will also auto-refresh it once every night at midnight while the dashboard is open (or the next time the dashboard is opened). If your network or this browser blocks the live fetch, use the file upload or paste option below instead — both work fully offline.</div>';
+    html += '<div class="banner beta" style="margin-top:12px;">Once a link is saved and mapped here, the server automatically re-fetches and re-syncs it every few hours on its own — no one needs to be logged in or have this dashboard open. If your network or this browser blocks the live fetch, use the file upload or paste option below instead — both work fully offline (but do need someone to run them manually).</div>';
     html += '</div>';
 
     html += '<div class="card">';
@@ -952,12 +958,7 @@
     applyParsedRows(headers, parsed.data, sourceType);
   }
 
-  /* ---------------- automatic nightly refresh ---------------- */
-  function todayKey(){
-    var d = new Date();
-    return d.getFullYear() + '-' + (d.getMonth()+1) + '-' + d.getDate();
-  }
-
+  /* ---------------- spreadsheet sync ---------------- */
   function autoSyncFromSheet(silent){
     var url = state.source.sheetUrl;
     if (!url) return;
@@ -966,7 +967,6 @@
       if (!r.ok) throw new Error('Request failed ('+r.status+')');
       return r.text();
     }).then(function(text){
-      save(LS.autosync, todayKey());
       parseCsvText(text, 'google-sheet');
     }).catch(function(err){
       if (!silent) {
@@ -976,19 +976,16 @@
     });
   }
 
-  function runAutoSyncIfDue(){
-    if (!state.source.sheetUrl) return;
-    if (load(LS.autosync, '') === todayKey()) return;
-    autoSyncFromSheet(true);
-  }
-
-  function scheduleMidnightAutoSync(){
-    var now = new Date();
-    var next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 1, 0);
-    setTimeout(function(){
-      runAutoSyncIfDue();
-      scheduleMidnightAutoSync();
-    }, next.getTime() - now.getTime());
+  // Saves the sheet link + field mapping to the shared database (not just this
+  // browser) so the server-side scheduled sync always has the current config,
+  // regardless of who is or isn't logged in anywhere.
+  function saveSyncConfigToServer(){
+    if (!state.sessionToken) return;
+    sbRpc('staff_save_sync_config', {
+      p_token: state.sessionToken,
+      p_sheet_url: state.source.sheetUrl || '',
+      p_field_map: state.fieldMap
+    }).catch(function(){ /* best-effort — manual sync and the next save will retry */ });
   }
 
   /* ---------------- event binding ---------------- */
@@ -1156,6 +1153,7 @@
       var url = document.getElementById('sheet-url').value.trim();
       if (!url) return;
       state.source.sheetUrl = url; save(LS.source, state.source);
+      saveSyncConfigToServer();
       autoSyncFromSheet(false);
     };
 
@@ -1194,6 +1192,7 @@
         if (sel) state.fieldMap[f.key] = sel.value;
       });
       save(LS.map, state.fieldMap);
+      saveSyncConfigToServer();
       state.syncStatus = { ok:true, msg:'Saving…' };
       render();
       rebuildTicketsFromSource(function(n){
@@ -1483,7 +1482,9 @@
     doc.text('Total tickets: ' + stats.total, margin, y);
     doc.text('Paid: ' + stats.paid, margin + 170, y);
     doc.text('Unpaid / overdue: ' + stats.unpaid, margin + 300, y);
-    doc.text('Total collected: ' + fmtMoney(stats.collected), margin + 480, y);
+    y += 16;
+    doc.text('Total collected: ' + fmtMoney(stats.collected), margin, y);
+    doc.text('Not yet collected: ' + fmtMoney(stats.outstanding), margin + 170, y);
     y += 24;
 
     var cols = [
