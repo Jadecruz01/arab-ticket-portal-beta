@@ -228,7 +228,8 @@
     map: 'arab_field_map_v1',
     source: 'arab_source_v1',
     bank: 'arab_bank_v1',
-    session: 'arab_admin_session_v2'
+    session: 'arab_admin_session_v2',
+    autosync: 'arab_last_autosync_v1'
   };
 
   function load(key, fallback){
@@ -754,7 +755,7 @@
     html += '<div class="section-sub">In Google Sheets: File → Share → Publish to web → select the ticket sheet → CSV, then paste that link below.</div>';
     html += '<div class="field"><label for="sheet-url">Published CSV link</label><input id="sheet-url" placeholder="https://docs.google.com/.../pub?output=csv" value="'+esc(s.sheetUrl||'')+'"></div>';
     html += '<button class="primary" id="btn-fetch-sheet">Fetch &amp; sync from link</button>';
-    html += '<div class="banner beta" style="margin-top:12px;">If your network or this browser blocks the live fetch, use the file upload or paste option below instead — both work fully offline.</div>';
+    html += '<div class="banner beta" style="margin-top:12px;">Once a link is saved here, this browser will also auto-refresh it once every night at midnight while the dashboard is open (or the next time the dashboard is opened). If your network or this browser blocks the live fetch, use the file upload or paste option below instead — both work fully offline.</div>';
     html += '</div>';
 
     html += '<div class="card">';
@@ -951,6 +952,45 @@
     applyParsedRows(headers, parsed.data, sourceType);
   }
 
+  /* ---------------- automatic nightly refresh ---------------- */
+  function todayKey(){
+    var d = new Date();
+    return d.getFullYear() + '-' + (d.getMonth()+1) + '-' + d.getDate();
+  }
+
+  function autoSyncFromSheet(silent){
+    var url = state.source.sheetUrl;
+    if (!url) return;
+    if (!silent) { state.syncStatus = { ok:true, msg:'Fetching…' }; render(); }
+    fetch(url).then(function(r){
+      if (!r.ok) throw new Error('Request failed ('+r.status+')');
+      return r.text();
+    }).then(function(text){
+      save(LS.autosync, todayKey());
+      parseCsvText(text, 'google-sheet');
+    }).catch(function(err){
+      if (!silent) {
+        state.syncStatus = { ok:false, msg: "Couldn't fetch that link directly (" + err.message + "). This can happen if the sheet isn't published to the web, or if this browser blocks the request. Try the file upload or paste-CSV option below instead." };
+        render();
+      }
+    });
+  }
+
+  function runAutoSyncIfDue(){
+    if (!state.source.sheetUrl) return;
+    if (load(LS.autosync, '') === todayKey()) return;
+    autoSyncFromSheet(true);
+  }
+
+  function scheduleMidnightAutoSync(){
+    var now = new Date();
+    var next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 1, 0);
+    setTimeout(function(){
+      runAutoSyncIfDue();
+      scheduleMidnightAutoSync();
+    }, next.getTime() - now.getTime());
+  }
+
   /* ---------------- event binding ---------------- */
   function bind(){
     var el = document.getElementById('app');
@@ -1116,16 +1156,7 @@
       var url = document.getElementById('sheet-url').value.trim();
       if (!url) return;
       state.source.sheetUrl = url; save(LS.source, state.source);
-      state.syncStatus = { ok:true, msg:'Fetching…' }; render();
-      fetch(url).then(function(r){
-        if (!r.ok) throw new Error('Request failed ('+r.status+')');
-        return r.text();
-      }).then(function(text){
-        parseCsvText(text, 'google-sheet');
-      }).catch(function(err){
-        state.syncStatus = { ok:false, msg: "Couldn't fetch that link directly (" + err.message + "). This can happen if the sheet isn't published to the web, or if this browser blocks the request. Try the file upload or paste-CSV option below instead." };
-        render();
-      });
+      autoSyncFromSheet(false);
     };
 
     var fileUpload = document.getElementById('file-upload');
@@ -1492,6 +1523,8 @@
 
   render();
   restoreSession();
+  runAutoSyncIfDue();
+  scheduleMidnightAutoSync();
 })();
 </script>
 </body>
